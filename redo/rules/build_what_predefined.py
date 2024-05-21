@@ -1,7 +1,5 @@
 
 from base_classes.build_rule_base import build_rule_base
-import os.path
-from os import environ
 import sys
 
 
@@ -46,4 +44,3 @@ class build_what_predefined(build_rule_base):
         sys.stderr.write(
             "redo " + "\nredo ".join(sorted(redo_targets)) + "\n"
         )
-
