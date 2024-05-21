@@ -21,15 +21,15 @@ __do_caching () {
     status=$?
     echo $res
     [ "$status" = 0 ] || return 2
-    mkdir -p ./build/redo && echo "$res" > ./build/redo/whatcache.txt
+    mkdir -p ./build/redo && echo "$res" > ./build/redo/what_cache.txt
     [ "$?" = 0 ] || return 1
     return 0
 }
 
 
 __cache_ok () {
-    [ -f ./build/redo/whatcache.txt ] || return 1
-    [ -n "$(cat ./build/redo/whatcache.txt)" ] || return 1
+    [ -f ./build/redo/what_cache.txt ] || return 1
+    [ -n "$(cat ./build/redo/what_cache.txt)" ] || return 1
     # check for file integrity, timestamp, etc?
     return 0
 }
@@ -79,7 +79,7 @@ __redo_completion () {
         do_synch=true
     else
         if __cache_ok; then
-            compgen_arg=$(cat ./build/redo/whatcache.txt)
+            compgen_arg=$(cat ./build/redo/what_cache.txt)
         else
             # fallback to `redo what_predefined`
             compgen_arg=$(__what_predef_parsed)
