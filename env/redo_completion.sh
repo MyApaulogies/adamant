@@ -91,8 +91,8 @@ __redo_completion () {
 
         compgen_res=$(compgen -W "$compgen_arg" "$this_word")
 
-        # if nothing in cache matches, do synchronous anyway
-        if [ -z "$compgen_res" ]; then
+        # if nothing in cache matches, do synchronous anyway (but only on first run to make it responsive)
+        if [ "$first_run" = true ] && [ -z "$compgen_res" ]; then
             do_synch=true
         elif ! ps p "$__redo_what_bg_pid" >/dev/null 2>&1; then
             # pid is not alive, so start bg process
