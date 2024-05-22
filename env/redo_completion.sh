@@ -70,13 +70,26 @@ __dir_cache_clean () {
 
 
 __save_bg_pid () {
-    local path=$1
-    __redo_what_bg_pid=$2
+    local path=$1 pid=$2
+
+    mkdir -p "$path"/build/redo/ && echo "$pid" > "$path"/build/redo/what_cache_pid.txt
 }
 
+# __unsave_bg_pid () {
+#     local path=$1
+
+#     rm "$path"/build/redo/what_cache_pid.txt
+# }
+
 __echo_bg_pid () {
-    local path=$1
-    echo "$__redo_what_bg_pid"
+    local path=$1 filename=./build/redo/what_cache_pid.txt
+    [ -f "$filename" ] || return 1
+
+    local pid=$(cat "$filename")
+    [ $? = 0 ] || return 1
+
+    echo "$pid"
+    return 0
 }
 
 
@@ -132,6 +145,11 @@ __redo_completion_helper () {
     do_synchronous () {
         compgen_arg=$(__do_caching "$path")
         RES=$(compgen -W "$compgen_arg" "$arg")
+    }
+
+    do_async () {
+        __do_caching "$path" >/dev/null
+        __save_bg_pid "$path" $!
     }
 
     unset_funcs ()  {
@@ -208,8 +226,7 @@ __redo_completion_helper () {
     # so start a `redo what` background thread if not started
     if ! ps p "$(__echo_bg_pid "$path")" &>/dev/null; then
         # pid is not alive, so start bg process
-        (__do_caching "$path" >/dev/null &)
-        __save_bg_pid "$path" $!
+        (do_async &)
     fi
 
 
