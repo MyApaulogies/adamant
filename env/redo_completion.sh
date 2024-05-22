@@ -160,7 +160,7 @@ __redo_completion_helper () {
     finish () {
         __dir_do_visit "$path"
         unset_funcs
-        if [ -n "$RES" ]; then
+        if [ -n "$RES" ] && ! echo "$RES" | grep '/$' >/dev/null; then
             RES=$(echo "$RES" | sed 's/$/ /')
         fi
     }
@@ -213,9 +213,15 @@ __redo_completion_helper () {
         fi
 
         # $arg both doesn't have a match and doesn't contain a path
-        # so do synchronous anyway
-        # but only on first run per path to make it responsive
-        if __dir_first_visit "$path"; then
+        # but it might be a half-typed path
+        # so let's try giving completions for paths (that aren't ./build)
+        RES=$(compgen -d "$this_word" | grep -v '\bbuild\b' | sed 's/$/\//')
+
+        if [ -z "$RES" ] && __dir_first_visit "$path"; then
+            # now there's really nothing to match
+            # so do synchronous anyway
+            # but only on first run
+            # this is useful for i.e. autocompleting build/ in a directory for the first time after making a few .yaml files
             do_synchronous
             finish
             return 0
@@ -283,7 +289,9 @@ __redo_completion () {
     echo $special_arg > /dev/null
 }
 
-complete -o nospace -o dirnames -F __redo_completion redo
+# the reason we can't use `complete -o dirnames` is that
+# we need to exclude ./build (and want to exclude hidden dirs)
+complete -o nospace -F __redo_completion redo
 
 
 
