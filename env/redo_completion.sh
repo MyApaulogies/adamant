@@ -125,10 +125,6 @@ __redo_completion_helper () {
 
     if ! __what_predef_parsed $path >/dev/null; then
         # nothing to do here, redo what isn't even available
-
-        # override directory autocomplete due to `complete -o dirnames`
-        # TODO: maybe change to 'what'? or ideally some kind of &nbsp; character
-        RES=" "
         return 1
     fi
 
