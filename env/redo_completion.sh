@@ -73,39 +73,6 @@ __dir_cache_clean () {
 
 
 
-# __save_bg_pid () {
-#     local path=$1 pid=$2
-
-#     mkdir -p "$path"/build/redo/ && echo "$pid" > "$path"/build/redo/what_cache_pid.txt
-# }
-
-# __unsave_bg_pid () {
-#     local path=$1
-#     local file=./build/redo/what_cache_pid.txt
-
-#     [ -d "$file" ] && rm "$file"
-# }
-
-# __echo_bg_pid () {
-#     local path=$1 filename=./build/redo/what_cache_pid.txt
-#     [ -f "$filename" ] || return 1
-
-#     local pid=$(cat "$filename")
-#     [ $? = 0 ] || return 1
-
-#     echo "$pid"
-#     return 0
-# }
-
-# __bg_pid_alive () {
-#     local path=$1
-#     local pid="$(__echo_bg_pid "$path")"
-#     [ $? = 0 ] || return 1
-#     kill -0 $pid &>/dev/null
-# }
-
-
-
 __save_last_confirmed_dir () {
     local dir=$1
     # echo - "saved $dir"
@@ -116,7 +83,8 @@ __get_last_confirmed_dir () {
     local filename=./build/redo/what_cache_lastdir.txt
     [ -f "$filename" ] || return 1
 
-    local dir=$(cat "$filename")
+    local dir
+    dir=$(cat "$filename")
     [ $? = 0 ] || return 1
 
     LAST_DIR="$dir"
@@ -127,7 +95,7 @@ __get_last_confirmed_dir () {
 
 
 __prepend () {
-    while read line; do
+    while read -r line; do
         echo "$1$line"
     done
 }
@@ -147,7 +115,7 @@ __try_trim_leading_dir () {
         LEAD_DIR=$(echo "$string" | sed 's/\/\/*/\//' | cut -d '/' -f 1)
         if [ "$LEAD_DIR" != build ] && [ -d "$basepath/$LEAD_DIR" ]; then
             all_ifs=true
-            REST=$(echo $string | sed 's/\/\/*/\//' | cut -d '/' -f 2-)
+            REST=$(echo "$string" | sed 's/\/\/*/\//' | cut -d '/' -f 2-)
         fi
     fi
 
@@ -160,21 +128,19 @@ __try_trim_leading_dir () {
 __redo_completion_helper () {
     local path=$1 arg=$2
 
-
-
-    if pwd | grep '/build$' >/dev/null || ! __what_predef_parsed $path >/dev/null; then
+    if pwd | grep '/build$' >/dev/null || ! __what_predef_parsed "$path" >/dev/null; then
         # nothing to do here, `redo what` isn't even available
     #     echo - dip
         return 1
     fi
 
     # clean up $path / $arg -- replace instances of ./ with nothing
-    path=$(echo $path | sed 's/\b\.\///')
-    arg=$(echo $arg | sed 's/\b\.\///')
+    path=$(echo "$path" | sed 's/\b\.\///')
+    arg=$(echo "$arg" | sed 's/\b\.\///')
     [ "$arg" = . ] && arg=./ # just bc the user must have typed it in
 
     # path only gets edited when we recurse, so this is safe
-    __save_last_confirmed_dir $path
+    __save_last_confirmed_dir "$path"
 
 
     # return value
@@ -227,12 +193,6 @@ __redo_completion_helper () {
 
     #     echo - '> used cache'
 
-        # if pid is not alive, start a new background process
-
-        # if ! __bg_pid_alive "$path"; then
-        #     (do_async &)
-        #     echo  -n ' and started bg task'
-        # fi
         (do_async &)
 
         prepend_path
@@ -311,7 +271,6 @@ __redo_completion () {
     local first_run=false
     [ "$underscore" != "$special_arg" ] && first_run=true
 
-    
 
     # $_ is set to the argument of the last executed command
     # so on the first run, it will depend on what the user just ran
@@ -388,7 +347,7 @@ __redo_completion () {
 
         oldifs=$IFS
         IFS="
-    "
+"
         COMPREPLY=($RES)
         IFS=$oldifs
         unset oldifs
