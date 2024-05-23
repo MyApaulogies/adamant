@@ -34,6 +34,7 @@ __cache_ok () {
 }
 
 __do_caching () {
+    # echo  - ">f do caching enter"
     local path=$1
     local res status
     res="$(__what_parsed "$path")"
@@ -42,6 +43,7 @@ __do_caching () {
     [ "$status" = 0 ] || return 2
     mkdir -p "$path"/build/redo && echo "$res" > "$path"/build/redo/what_cache.txt
     [ "$?" = 0 ] || return 1
+    # echo  - ">f do caching exit"
     return 0
 }
 
@@ -77,11 +79,12 @@ __save_bg_pid () {
     mkdir -p "$path"/build/redo/ && echo "$pid" > "$path"/build/redo/what_cache_pid.txt
 }
 
-# __unsave_bg_pid () {
-#     local path=$1
+__unsave_bg_pid () {
+    local path=$1
+    local file=./build/redo/what_cache_pid.txt
 
-#     rm "$path"/build/redo/what_cache_pid.txt
-# }
+    [ -d "$file" ] && rm "$file"
+}
 
 __echo_bg_pid () {
     local path=$1 filename=./build/redo/what_cache_pid.txt
@@ -96,7 +99,9 @@ __echo_bg_pid () {
 
 __bg_pid_alive () {
     local path=$1
-    ps p "$(__echo_bg_pid "$path")" &>/dev/null
+    local pid="$(__echo_bg_pid "$path")"
+    [ $? = 0 ] || return 1
+    kill -0 $pid &>/dev/null
 }
 
 
@@ -136,14 +141,15 @@ __redo_completion_helper () {
     local path=$1 arg=$2
 
 
+
     if pwd | grep '/build$' >/dev/null || ! __what_predef_parsed $path >/dev/null; then
         # nothing to do here, `redo what` isn't even available
         return 1
     fi
 
     # clean up $path / $arg -- replace instances of ./ with nothing
-    path=$(echo $path | sed 's/\.\///')
-    arg=$(echo $arg | sed 's/\.\///')
+    path=$(echo $path | sed 's/\b\.\///')
+    arg=$(echo $arg | sed 's/\b\.\///')
     [ "$arg" = . ] && arg=./ # just bc the user must have typed it in
 
 
@@ -158,6 +164,8 @@ __redo_completion_helper () {
         __dir_do_visit "$path"
     fi
 
+    # echo - "enter: path=($path) arg=($arg) first_run=$first_run"
+    
     do_synchronous () {
         compgen_arg=$(__do_caching "$path")
         RES=$(compgen -W "$compgen_arg" "$arg")
@@ -165,11 +173,17 @@ __redo_completion_helper () {
 
     do_async () {
         __do_caching "$path" >/dev/null
-        __save_bg_pid "$path" $!
+        # __save_bg_pid "$path" $!
+    }
+
+    prepend_path () {
+        if [ $path != . ]; then
+            RES=$(echo "$RES" | __prepend "$path/")
+        fi
     }
 
     unset_funcs ()  {
-        unset -f finish do_synchronous unset_funcs
+        unset -f finish do_synchronous unset_funcs task prepend_path
     }
 
     finish () {
@@ -193,14 +207,17 @@ __redo_completion_helper () {
     # if typed `redo <tab>`, bypass cache
     if [ "$first_run" = true ] && [ -z "$arg" ]; then
         do_synchronous
+        prepend_path
         finish # TODO: does finish logic belong?
         return 0
     fi
 
 
     if __cache_ok "$path"; then
+    #     echo - '> cache ok'
         compgen_arg=$(cat "$path"/build/redo/what_cache.txt)
     else
+    #     echo - '> cache fallback to what_predef'
         # fallback to `redo what_predefined`
         compgen_arg=$(__what_predef_parsed "$path")
     fi
@@ -215,24 +232,30 @@ __redo_completion_helper () {
     # if *still* no matches, synchronously run `redo what`
 
     if [ -n "$RES" ]; then
-        if [ $path != . ]; then
-            RES=$(echo "$RES" | __prepend "$path/")
-        fi
+
+    #     echo - '> used cache'
 
         # if pid is not alive, start a new background process
-        if ! __bg_pid_alive "$path"; then
-            (do_async &)
-        fi
 
+        # if ! __bg_pid_alive "$path"; then
+        #     (do_async &)
+        #     echo  -n ' and started bg task'
+        # fi
+        (do_async &)
+
+        prepend_path
         finish # TODO
         return 0
     fi
+
+    # echo - '> cache miss'
 
     # no match, so check for a path in the arg
     if __try_trim_leading_dir "$path" "$arg"; then
         # these are set by __try_trim_leading_dir
         local dir_prefix=$LEAD_DIR trimmed_arg=$REST
 
+        
     #     echo - "arg ($arg) vs trimmed halves ($dir_prefix) ($trimmed_arg)"
 
         if [ "$path" = . ]; then
@@ -241,7 +264,7 @@ __redo_completion_helper () {
             path=$path/$dir_prefix
         fi
 
-    #     echo - "recurse: path ($path) arg ($trimmed_arg)"
+    #     echo - "> recurse: path ($path) arg ($trimmed_arg)"
 
         __redo_completion_helper "$path" "$trimmed_arg"
         local status=$?
@@ -249,6 +272,8 @@ __redo_completion_helper () {
         # don't unset -- recursive call already took care of that
         return $status
     fi
+
+    # echo - '> no recurse'
 
     # echo - pre-full arg: "path ($path) arg ($arg)"
     # match against directories in $path
@@ -265,17 +290,25 @@ __redo_completion_helper () {
     # echo - full arg: $full_arg
 
     if [ -n "$RES" ]; then
+    #     echo - '> matched compgen -d'
         # we have a match, may as well start a bg task in this dir
-        if ! __bg_pid_alive "$path"; then
-            (do_async &)
-        fi
+        # if ! __bg_pid_alive "$path"; then
+        #     (do_async &)
+        # fi
+        (do_async &)
+
+        finish
+        return 0
     fi
+
+    # echo - '> synchronous time'
 
     # now there's really nothing to match
     # so do synchronous anyway, but only on first run
     # this is useful for i.e. autocompleting build/ in a directory for the first time after making a few .yaml files
     if [ "$first_run" = true ]; then
         do_synchronous
+        prepend_path
         finish # TODO
         return 0
     fi
