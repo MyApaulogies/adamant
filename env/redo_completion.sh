@@ -23,6 +23,8 @@ __what_predef_parsed () {
 
 
 
+
+
 __cache_ok () {
     local path=$1
     [ -f "$path"/build/redo/what_cache.txt ] || return 1
@@ -92,21 +94,35 @@ __echo_bg_pid () {
     return 0
 }
 
+__bg_pid_alive () {
+    local path=$1
+    ps p "$(__echo_bg_pid "$path")" &>/dev/null
+}
+
+
+
+__prepend () {
+    while read line; do
+        echo "$1$line"
+    done
+}
+
 
 
 
 # if $1 is formatted dir///other//stuff,
 # split into LEAD_DIR=dir RES=other//stuff
 __try_trim_leading_dir () {
+    local basepath=$1 string=$2
     local all_ifs=false
-    LEAD_DIR= 
+    LEAD_DIR=
     REST=
-    if echo "$1" | grep '/' >/dev/null; then
+    if echo "$string" | grep '/' >/dev/null; then
         # lmao, the sed command is replace 1 or more slashes with just 1 slash
-        LEAD_DIR=$(echo "$1" | sed 's/\/\/*/\//' | cut -d '/' -f '1')
-        if [ "$LEAD_DIR" != build ] && [ -d "$LEAD_DIR" ]; then
+        LEAD_DIR=$(echo "$string" | sed 's/\/\/*/\//' | cut -d '/' -f 1)
+        if [ "$LEAD_DIR" != build ] && [ -d "$basepath/$LEAD_DIR" ]; then
             all_ifs=true
-            REST=$(echo $1 | sed 's/\/\/*/\//' | cut -d '/' -f 2-)
+            REST=$(echo $string | sed 's/\/\/*/\//' | cut -d '/' -f 2-)
         fi
     fi
 
@@ -116,27 +132,31 @@ __try_trim_leading_dir () {
 
 
 
-
 __redo_completion_helper () {
-    local arg=$1 path=$2 empty_args=$3
+    local path=$1 arg=$2
 
-    # our return value
-    RES=
 
-    if ! __what_predef_parsed $path >/dev/null; then
-        # nothing to do here, redo what isn't even available
+    if pwd | grep '/build$' >/dev/null || ! __what_predef_parsed $path >/dev/null; then
+        # nothing to do here, `redo what` isn't even available
         return 1
     fi
 
+    # clean up $path / $arg -- replace instances of ./ with nothing
+    path=$(echo $path | sed 's/\.\///')
+    arg=$(echo $arg | sed 's/\.\///')
+    [ "$arg" = . ] && arg=./ # just bc the user must have typed it in
 
-    local compgen_arg do_synch=false onlywhat=false
 
-    local first_run=false
-    __dir_first_visit "$path" && first_run=true
 
-    # echo - first_run = $first_run
-    # echo - path = $path
+    # return value
+    RES=
 
+    # locals
+    local compgen_arg first_run=false
+    if __dir_first_visit "$path"; then
+        first_run=true
+        __dir_do_visit "$path"
+    fi
 
     do_synchronous () {
         compgen_arg=$(__do_caching "$path")
@@ -149,18 +169,21 @@ __redo_completion_helper () {
     }
 
     unset_funcs ()  {
-        unset -f finish
-        unset -f do_synchronous
+        unset -f finish do_synchronous unset_funcs
     }
 
     finish () {
-        __dir_do_visit "$path"
         unset_funcs
+        # if it ends with a slash, it's a path
+        # so if it doesn't end with a slash, we should add a space to it
         if [ -n "$RES" ] && ! echo "$RES" | grep '/$' >/dev/null; then
             RES=$(echo "$RES" | sed 's/$/ /')
         fi
     }
 
+
+    # logic
+    
     # I assume that if someone types `redo <tab>`,
     # they probably want an up-to-date list of commands
     # but if someone types `redo b<tab>` for example,
@@ -168,10 +191,9 @@ __redo_completion_helper () {
     # which is likely still available, and useful to provide instantly
 
     # if typed `redo <tab>`, bypass cache
-    # if __dir_first_visit "$path" && [ "$empty_args" = true ]; then
     if [ "$first_run" = true ] && [ -z "$arg" ]; then
         do_synchronous
-        finish
+        finish # TODO: does finish logic belong?
         return 0
     fi
 
@@ -183,95 +205,108 @@ __redo_completion_helper () {
         compgen_arg=$(__what_predef_parsed "$path")
     fi
 
-
     # generate completions
     RES=$(compgen -W "$compgen_arg" "$arg")
 
-    # use cache for responsiveness
-    # but make sure a background task is fetching up-to-date results
+    # if something matches, use the result and update caches in background
+    # if no matches yet, check for redo's path syntax
+    # -> if matches, recurse using subdirectory
+    # if still no matches, match against directory names
+    # if *still* no matches, synchronously run `redo what`
 
-    # if nothing in the cache matches, 
-    # we should check if they are using redo's path syntax
-    if [ -z "$RES" ]; then
-        if __try_trim_leading_dir "$arg" && [ "$LEAD_DIR" != build ]; then
-            # if so, recurse
-            __redo_completion_helper "$REST" "$LEAD_DIR" "$empty_args"
-            local status=$?
-
-
-            if [ -n "$RES" ]; then
-                # prepend $LEAD_DIR to all entries
-                RES=$(echo "$RES" | sed "s/^/$LEAD_DIR\//")
-            fi
-            
-            # no need to `finish`, already ran in other function call
-            return $status
+    if [ -n "$RES" ]; then
+        if [ $path != . ]; then
+            RES=$(echo "$RES" | __prepend "$path/")
         fi
 
-        # $arg both doesn't have a match and doesn't contain a path
-        # but it might be a half-typed path
-        # so let's try giving completions for paths (that aren't ./build)
-        RES=$(compgen -d "$this_word" | grep -v '\bbuild\b' | sed 's/$/\//')
+        # if pid is not alive, start a new background process
+        if ! __bg_pid_alive "$path"; then
+            (do_async &)
+        fi
 
-        if [ -z "$RES" ] && __dir_first_visit "$path"; then
-            # now there's really nothing to match
-            # so do synchronous anyway
-            # but only on first run
-            # this is useful for i.e. autocompleting build/ in a directory for the first time after making a few .yaml files
-            do_synchronous
-            finish
-            return 0
+        finish # TODO
+        return 0
+    fi
+
+    # no match, so check for a path in the arg
+    if __try_trim_leading_dir "$path" "$arg"; then
+        # these are set by __try_trim_leading_dir
+        local dir_prefix=$LEAD_DIR trimmed_arg=$REST
+
+    #     echo - "arg ($arg) vs trimmed halves ($dir_prefix) ($trimmed_arg)"
+
+        if [ "$path" = . ]; then
+            path=$dir_prefix
+        else
+            path=$path/$dir_prefix
+        fi
+
+    #     echo - "recurse: path ($path) arg ($trimmed_arg)"
+
+        __redo_completion_helper "$path" "$trimmed_arg"
+        local status=$?
+
+        # don't unset -- recursive call already took care of that
+        return $status
+    fi
+
+    # echo - pre-full arg: "path ($path) arg ($arg)"
+    # match against directories in $path
+    local full_arg
+    if [ "$path" = . ]; then
+        full_arg=$arg
+    elif [ -z "$arg" ]; then
+        full_arg=$path
+    else
+        full_arg=$path/$arg
+    fi
+    RES=$(compgen -d "$full_arg" | grep -v '\bbuild\b' | sed 's/$/\//')
+
+    # echo - full arg: $full_arg
+
+    if [ -n "$RES" ]; then
+        # we have a match, may as well start a bg task in this dir
+        if ! __bg_pid_alive "$path"; then
+            (do_async &)
         fi
     fi
 
-    # we used the cache, 
-    # so start a `redo what` background thread if not started
-    if ! ps p "$(__echo_bg_pid "$path")" &>/dev/null; then
-        # pid is not alive, so start bg process
-        (do_async &)
+    # now there's really nothing to match
+    # so do synchronous anyway, but only on first run
+    # this is useful for i.e. autocompleting build/ in a directory for the first time after making a few .yaml files
+    if [ "$first_run" = true ]; then
+        do_synchronous
+        finish # TODO
+        return 0
     fi
-
-
-    # # if nothing in cache matches, do synchronous anyway 
-    # # (but only on first run to make it responsive)
-    # if __dir_first_visit $path && [ -z "$compgen_res" ]; then
-    #     do_synchronous
-    #     finish
-
-    # elif ! bg_thread_alive; then
-    #     # pid is not alive, so start bg process
-    #     do_async
-    # fi
-
-    finish
-    return 0
 }
 
+
 __redo_completion () {
+    local underscore=$_ # must be very first command
+    local special_arg=____redo_completion_special_arg
+    local first_run=false
+    [ "$underscore" != "$special_arg" ] && first_run=true
+
+    # echo -
+
     # $_ is set to the argument of the last executed command
-    # on the first run, it will depend on what the user just ran
+    # so on the first run, it will depend on what the user just ran
     # the second run onwards, it will be set to $special_arg
     # this function runs once after every tab completion,
     # so we can use this to detect whether this is the user's first tab press
 
-    local underscore=$_ # must be very first command
-    local special_arg=____redo_completion_special_arg
-
-    local first_run=false
-    [ "$underscore" != "$special_arg" ] && first_run=true
-
-    # echo
-    # echo - cleaned cache = $first_run
+    # helps us figure out whether blocking on `redo what` is a waste
+    # if first_run=true then the user might have run commands 
+    # which might change the output of `redo what`
     if [ $first_run = true ]; then
         __dir_cache_clean
     fi
 
     local cmdname=$1 this_word=$2 prev_word=$3
 
-    local empty_args=false
-    [ -z "$this_word" ] && [ "$prev_word" = "$cmdname" ] && empty_args=true
-
-    __redo_completion_helper "$this_word" . "$empty_args"
+    # sets the RES variable
+    __redo_completion_helper . "$this_word"
 
     oldifs=$IFS
     IFS="
@@ -279,18 +314,13 @@ __redo_completion () {
     COMPREPLY=($RES)
     IFS=$oldifs
     unset oldifs
-    # unset RES
-
+    
     # must be very last command, see top
     echo $special_arg > /dev/null
 }
 
 # the reason we can't use `complete -o dirnames` is that
 # we need to exclude ./build (and want to exclude hidden dirs)
-complete -o nospace -F __redo_completion redo
-
-
-
-
+complete -o nospace -o nosort -F __redo_completion redo
 
 
