@@ -73,36 +73,56 @@ __dir_cache_clean () {
 
 
 
-__save_bg_pid () {
-    local path=$1 pid=$2
+# __save_bg_pid () {
+#     local path=$1 pid=$2
 
-    mkdir -p "$path"/build/redo/ && echo "$pid" > "$path"/build/redo/what_cache_pid.txt
+#     mkdir -p "$path"/build/redo/ && echo "$pid" > "$path"/build/redo/what_cache_pid.txt
+# }
+
+# __unsave_bg_pid () {
+#     local path=$1
+#     local file=./build/redo/what_cache_pid.txt
+
+#     [ -d "$file" ] && rm "$file"
+# }
+
+# __echo_bg_pid () {
+#     local path=$1 filename=./build/redo/what_cache_pid.txt
+#     [ -f "$filename" ] || return 1
+
+#     local pid=$(cat "$filename")
+#     [ $? = 0 ] || return 1
+
+#     echo "$pid"
+#     return 0
+# }
+
+# __bg_pid_alive () {
+#     local path=$1
+#     local pid="$(__echo_bg_pid "$path")"
+#     [ $? = 0 ] || return 1
+#     kill -0 $pid &>/dev/null
+# }
+
+
+
+__save_last_confirmed_dir () {
+    local dir=$1
+    # echo - "saved $dir"
+    mkdir -p ./build/redo/ && echo "$dir" > ./build/redo/what_cache_lastdir.txt
 }
 
-__unsave_bg_pid () {
-    local path=$1
-    local file=./build/redo/what_cache_pid.txt
-
-    [ -d "$file" ] && rm "$file"
-}
-
-__echo_bg_pid () {
-    local path=$1 filename=./build/redo/what_cache_pid.txt
+__get_last_confirmed_dir () {
+    local filename=./build/redo/what_cache_lastdir.txt
     [ -f "$filename" ] || return 1
 
-    local pid=$(cat "$filename")
+    local dir=$(cat "$filename")
     [ $? = 0 ] || return 1
 
-    echo "$pid"
+    LAST_DIR="$dir"
     return 0
 }
 
-__bg_pid_alive () {
-    local path=$1
-    local pid="$(__echo_bg_pid "$path")"
-    [ $? = 0 ] || return 1
-    kill -0 $pid &>/dev/null
-}
 
 
 
@@ -144,6 +164,7 @@ __redo_completion_helper () {
 
     if pwd | grep '/build$' >/dev/null || ! __what_predef_parsed $path >/dev/null; then
         # nothing to do here, `redo what` isn't even available
+    #     echo - dip
         return 1
     fi
 
@@ -152,6 +173,8 @@ __redo_completion_helper () {
     arg=$(echo $arg | sed 's/\b\.\///')
     [ "$arg" = . ] && arg=./ # just bc the user must have typed it in
 
+    # path only gets edited when we recurse, so this is safe
+    __save_last_confirmed_dir $path
 
 
     # return value
@@ -166,36 +189,6 @@ __redo_completion_helper () {
 
     # echo - "enter: path=($path) arg=($arg) first_run=$first_run"
     
-    do_synchronous () {
-        compgen_arg=$(__do_caching "$path")
-        RES=$(compgen -W "$compgen_arg" "$arg")
-    }
-
-    do_async () {
-        __do_caching "$path" >/dev/null
-        # __save_bg_pid "$path" $!
-    }
-
-    prepend_path () {
-        if [ $path != . ]; then
-            RES=$(echo "$RES" | __prepend "$path/")
-        fi
-    }
-
-    unset_funcs ()  {
-        unset -f finish do_synchronous unset_funcs task prepend_path
-    }
-
-    finish () {
-        unset_funcs
-        # if it ends with a slash, it's a path
-        # so if it doesn't end with a slash, we should add a space to it
-        if [ -n "$RES" ] && ! echo "$RES" | grep '/$' >/dev/null; then
-            RES=$(echo "$RES" | sed 's/$/ /')
-        fi
-    }
-
-
     # logic
     
     # I assume that if someone types `redo <tab>`,
@@ -208,7 +201,6 @@ __redo_completion_helper () {
     if [ "$first_run" = true ] && [ -z "$arg" ]; then
         do_synchronous
         prepend_path
-        finish # TODO: does finish logic belong?
         return 0
     fi
 
@@ -244,7 +236,6 @@ __redo_completion_helper () {
         (do_async &)
 
         prepend_path
-        finish # TODO
         return 0
     fi
 
@@ -265,6 +256,7 @@ __redo_completion_helper () {
         fi
 
     #     echo - "> recurse: path ($path) arg ($trimmed_arg)"
+
 
         __redo_completion_helper "$path" "$trimmed_arg"
         local status=$?
@@ -297,7 +289,6 @@ __redo_completion_helper () {
         # fi
         (do_async &)
 
-        finish
         return 0
     fi
 
@@ -309,7 +300,6 @@ __redo_completion_helper () {
     if [ "$first_run" = true ]; then
         do_synchronous
         prepend_path
-        finish # TODO
         return 0
     fi
 }
@@ -321,7 +311,7 @@ __redo_completion () {
     local first_run=false
     [ "$underscore" != "$special_arg" ] && first_run=true
 
-    # echo -
+    
 
     # $_ is set to the argument of the last executed command
     # so on the first run, it will depend on what the user just ran
@@ -338,15 +328,71 @@ __redo_completion () {
 
     local cmdname=$1 this_word=$2 prev_word=$3
 
-    # sets the RES variable
-    __redo_completion_helper . "$this_word"
+    # echo -
+    # echo - start: "first_run=$first_run this_word=$this_word"
 
-    oldifs=$IFS
-    IFS="
-"
-    COMPREPLY=($RES)
-    IFS=$oldifs
-    unset oldifs
+    # make "local" functinos for helper function
+    do_synchronous () {
+        compgen_arg=$(__do_caching "$path")
+        RES=$(compgen -W "$compgen_arg" "$arg")
+    }
+
+    do_async () {
+        __do_caching "$path" >/dev/null
+        # __save_bg_pid "$path" $!
+    }
+
+    prepend_path () {
+        if [ $path != . ] && [ -n "$RES" ]; then
+            RES=$(echo "$RES" | __prepend "$path/")
+        fi
+    }
+
+    local subdir trimmed_arg
+    try_cached_dir () {
+        subdir= trimmed_arg=
+        local all_ifs=false
+        if __get_last_confirmed_dir; then
+            local lastdir=$LAST_DIR
+
+            # check if arg starts with dir
+            if echo "$this_word" | grep "^$lastdir" >/dev/null; then
+                subdir=$lastdir
+                # apparently, trims prefix from string (note trailing slash)
+                trimmed_arg=$(echo "${this_word#*$subdir}" | sed 's/^\///')
+    #             echo - "last confirmed: subdir=$subdir trimmed_arg=$trimmed_arg"
+                all_ifs=true
+            fi
+        fi
+        [ "$all_ifs" = true ] && return 0 || return 1
+    }
+
+    # helper function sets the RES variable
+    if [ "$first_run" = false ] && try_cached_dir; then
+        # this saves a few recursions 
+        # see recursion in helper function for when this gets cached
+    #     echo - "> insta-recurse"
+        __redo_completion_helper "$subdir" "$trimmed_arg"
+    else
+        __redo_completion_helper . "$this_word"
+    fi
+
+    unset -f do_synchronous unset_funcs task prepend_path
+
+    if [ $? = 0 ]; then
+        # if it ends with a slash, it's a path
+        # so if it doesn't end with a slash, we should add a space to it
+        if [ -n "$RES" ] && ! echo "$RES" | grep '/$' >/dev/null; then
+            RES=$(echo "$RES" | sed 's/$/ /')
+        fi
+
+        oldifs=$IFS
+        IFS="
+    "
+        COMPREPLY=($RES)
+        IFS=$oldifs
+        unset oldifs
+    fi
     
     # must be very last command, see top
     echo $special_arg > /dev/null
