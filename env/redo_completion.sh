@@ -46,7 +46,8 @@ __redo_completion () {
 
 
 
-    cache_ok () {
+    # main cache: output of the last time we ran `redo what`
+    words_cache_ok () {
         local path=$1
         [ -f "$path"/build/redo/what_cache.txt ] || return 1
         [ -n "$(cat "$path"/build/redo/what_cache.txt)" ] || return 1
@@ -54,7 +55,7 @@ __redo_completion () {
         return 0
     }
 
-    do_caching () {
+    words_cache_save () {
         # echo  - ">f do caching enter"
         local path=$1
         local res status
@@ -79,7 +80,7 @@ __redo_completion () {
         return 0
     }
 
-    dir_do_visit () {
+    dir_cache_save () {
         local path=$1 
         mkdir -p ./build/redo/ && echo "$path" >> ./build/redo/what_cache_dirs.txt
     }
@@ -92,6 +93,8 @@ __redo_completion () {
 
 
 
+    # shorter-lived cache to avoid having to recurse every new dir completion
+    # see usages of `save_last_confirmed_dir` and `try_cached_dir`
     save_last_confirmed_dir () {
         local dir=$1
         # echo - "saved $dir"
@@ -122,6 +125,7 @@ __redo_completion () {
 
     # if $1 is formatted dir///other//stuff,
     # split into LEAD_DIR=dir RES=other//stuff
+    # also checks if $1/LEAD_DIR is a directory, not just for syntax
     try_trim_leading_dir () {
         local basepath=$1 string=$2
         local all_ifs=false
@@ -140,40 +144,21 @@ __redo_completion () {
         return 1
     }
 
-    local subdir trimmed_arg
-    try_cached_dir () {
-        subdir= trimmed_arg=
-        local all_ifs=false
-        if get_last_confirmed_dir; then
-            local lastdir=$LAST_DIR
-
-            # check if arg starts with dir
-            if echo "$this_word" | grep "^$lastdir" >/dev/null; then
-                subdir=$lastdir
-                # apparently, trims prefix from string (note trailing slash)
-                trimmed_arg=$(echo "${this_word#*$subdir}" | sed 's/^\///')
-    #             echo - "last confirmed: subdir=$subdir trimmed_arg=$trimmed_arg"
-                all_ifs=true
-            fi
-        fi
-        [ "$all_ifs" = true ] && return 0 || return 1
-    }
 
 
 
+    # more like subroutines for redo_completion_helper
 
-    # more like subroutines for helper function
-
-    do_synchronous () {
-        compgen_arg=$(do_caching "$path")
+    synchronous_work () {
+        compgen_arg=$(words_cache_save "$path")
         RES=$(compgen -W "$compgen_arg" "$arg")
     }
 
-    do_async () {
-        do_caching "$path" >/dev/null
-        # save_bg_pid "$path" $!
+    async_work () {
+        words_cache_save "$path" >/dev/null
     }
 
+    # we `prepend_path` every branch, except for when `compgen -d` does it for us
     prepend_path () {
         if [ $path != . ] && [ -n "$RES" ]; then
             RES=$(echo "$RES" | prepend "$path/")
@@ -181,7 +166,6 @@ __redo_completion () {
     }
 
     # main helper function
-
     redo_completion_helper () {
         local path=$1 arg=$2
 
@@ -207,50 +191,53 @@ __redo_completion () {
         local compgen_arg first_run=false
         if dir_first_visit "$path"; then
             first_run=true
-            dir_do_visit "$path"
+            dir_cache_save "$path"
         fi
 
         # echo - "enter: path=($path) arg=($arg) first_run=$first_run"
     
-        # logic
-    
+        # overview:
+        # if typed `redo <tab>` or `redo path/<tab>`, run `redo what` synchronously
+        # check word cache (fallback to `redo what_predefined`)
+        # -> if match, use the result and update caches in background
+        # if no matches yet, check for redo's path syntax
+        # -> if match, recurse using subdirectory
+        # if still no matches, match against directory names
+        # if *still* no matches, and cache is outdated, synchronously run `redo what`
+        # return regardless of matches
+
+
         # I assume that if someone types `redo <tab>`,
         # they probably want an up-to-date list of commands
         # but if someone types `redo b<tab>` for example,
         # they probably intended to autocomplete build/
         # which is likely still available, and useful to provide instantly
 
-        # if typed `redo <tab>`, bypass cache
+        # if typed `redo <tab>` and cache is outdated, bypass cache
         if [ "$first_run" = true ] && [ -z "$arg" ]; then
-            do_synchronous
+            synchronous_work
             prepend_path
             return 0
         fi
 
 
-        if cache_ok "$path"; then
-        #     echo - '> cache ok'
+        if words_cache_ok "$path"; then
             compgen_arg=$(cat "$path"/build/redo/what_cache.txt)
+        #     echo - '> cache ok'
         else
-        #     echo - '> cache fallback to what_predef'
             # fallback to `redo what_predefined`
             compgen_arg=$(what_predef_parsed "$path")
+        #     echo - '> cache fallback to what_predef'
         fi
 
         # generate completions
         RES=$(compgen -W "$compgen_arg" "$arg")
 
-        # if something matches, use the result and update caches in background
-        # if no matches yet, check for redo's path syntax
-        # -> if matches, recurse using subdirectory
-        # if still no matches, match against directory names
-        # if *still* no matches, synchronously run `redo what`
-
         if [ -n "$RES" ]; then
 
         #     echo - '> used cache'
 
-            (do_async &)
+            (async_work &)
 
             prepend_path
             return 0
@@ -258,14 +245,17 @@ __redo_completion () {
 
         # echo - '> cache miss'
 
-        # no match, so check for a path in the arg
+        # no match, so check for a directory prefix
         if try_trim_leading_dir "$path" "$arg"; then
+            # found directory, so recurse "into" it
+
             # these are set by try_trim_leading_dir
             local dir_prefix=$LEAD_DIR trimmed_arg=$REST
 
-        
         #     echo - "arg ($arg) vs trimmed halves ($dir_prefix) ($trimmed_arg)"
 
+            # keep paths as clean as possible to prevent stacking
+            # potential todo: detect if user deliberately typed "." and if so, keep
             if [ "$path" = . ]; then
                 path=$dir_prefix
             else
@@ -278,7 +268,6 @@ __redo_completion () {
             redo_completion_helper "$path" "$trimmed_arg"
             local status=$?
 
-            # don't unset -- recursive call already took care of that
             return $status
         fi
 
@@ -301,10 +290,10 @@ __redo_completion () {
         if [ -n "$RES" ]; then
         #     echo - '> matched compgen -d'
             # we have a match, may as well start a bg task in this dir
-            # if ! __bg_pid_alive "$path"; then
-            #     (do_async &)
-            # fi
-            (do_async &)
+            (async_work &)
+
+            # don't prepend path, `compgen -d` provides full path names
+            # (since we never `cd` even on recursive calls)
 
             return 0
         fi
@@ -313,12 +302,36 @@ __redo_completion () {
 
         # now there's really nothing to match
         # so do synchronous anyway, but only on first run
-        # this is useful for i.e. autocompleting build/ in a directory for the first time after making a few .yaml files
+        # this is useful for i.e. autocompleting build/ in a directory for the first time after making a .component.yaml file
         if [ "$first_run" = true ]; then
-            do_synchronous
+            synchronous_work
             prepend_path
             return 0
         fi
+    }
+
+
+
+    # subroutine for below
+    local subdir trimmed_arg
+    try_cached_dir () {
+        subdir= trimmed_arg=
+        local all_ifs=false
+        if get_last_confirmed_dir; then
+            local lastdir=$LAST_DIR
+
+            # check if arg starts with dir
+            if echo "$this_word" | grep "^$lastdir" >/dev/null; then
+                subdir=$lastdir
+
+                # the #*$ bit trims a prefix off the left string
+                trimmed_arg=$(echo "${this_word#*$subdir}" | sed 's/^\///')
+                all_ifs=true
+
+    #             echo - "last confirmed: subdir=$subdir trimmed_arg=$trimmed_arg"
+            fi
+        fi
+        [ "$all_ifs" = true ] && return 0 || return 1
     }
 
 
@@ -364,7 +377,7 @@ __redo_completion () {
         unset oldifs
     fi
 
-    unset -f redo_cmd_parsed what_parsed what_predef_parsed cache_ok do_caching dir_first_visit dir_do_visit dir_cache_clean save_last_confirmed_dir get_last_confirmed_dir prepend try_trim_leading_dir do_synchronous do_async prepend_path redo_completion_helper try_cached_dir
+    unset -f redo_cmd_parsed what_parsed what_predef_parsed words_cache_ok words_cache_save dir_first_visit dir_cache_save dir_cache_clean save_last_confirmed_dir get_last_confirmed_dir prepend try_trim_leading_dir synchronous_work async_work prepend_path redo_completion_helper try_cached_dir
     
     # must be very last command, see top
     echo $special_arg > /dev/null
