@@ -27,7 +27,7 @@ __redo_completion () {
     # takes in an argument, likely `what` or `what_predefined`
     redo_cmd_parsed () {
         redo "$1" 2>&1 | tail +2 | sed 's/^redo //' | sed 's/\n/ /' | echo "$(cat -)
-    what" | grep -v "^$"
+what" | grep -v "^$"
         return ${PIPESTATUS[0]} # i.e. status of redo what
     }
 
@@ -97,7 +97,7 @@ __redo_completion () {
     # see usages of `save_last_confirmed_dir` and `try_cached_dir`
     save_last_confirmed_dir () {
         local dir=$1
-        # echo - "saved $dir"
+    #     echo - "saved $dir"
         mkdir -p ./build/redo/ && echo "$dir" > ./build/redo/what_cache_lastdir.txt
     }
 
@@ -149,43 +149,110 @@ __redo_completion () {
 
     # more like subroutines for redo_completion_helper
 
-    synchronous_work () {
-        compgen_arg=$(words_cache_save "$path")
-        RES=$(compgen -W "$compgen_arg" "$arg")
-    }
-
-    async_work () {
-        words_cache_save "$path" >/dev/null
-    }
-
-    # we `prepend_path` every branch, except for when `compgen -d` does it for us
     prepend_path () {
         if [ $path != . ] && [ -n "$RES" ]; then
             RES=$(echo "$RES" | prepend "$path/")
         fi
     }
 
+    append_compgen_dirs () {
+        # match against directories in $path
+        local full_arg
+        if [ "$path" = . ]; then
+            full_arg=$arg
+        # elif [ -z "$arg" ]; then
+            # full_arg=$path
+        else
+            full_arg=$path/$arg
+        fi
+
+    #     echo - full arg: "$full_arg"
+
+        # stupid way of appending lines to variable
+        RES=$(echo "$RES
+$(compgen -d "$full_arg" | grep -v '\bbuild\b' | sed 's/$/\//')" | grep -v '^$')
+    }
+
+    synchronous_work () {
+        compgen_arg=$(words_cache_save "$path")
+        RES=$(compgen -W "$compgen_arg" "$arg")
+        prepend_path
+        append_compgen_dirs
+    }
+
+    async_work () {
+        words_cache_save "$path" >/dev/null
+    }
+
+    should_recurse () {
+        try_trim_leading_dir "$path" "$arg"
+    }
+
+    do_recurse () {
+
+        # these are set by try_trim_leading_dir
+        local dir_prefix=$LEAD_DIR trimmed_arg=$REST
+
+#         echo - "arg ($arg) vs trimmed halves ($dir_prefix) ($trimmed_arg)"
+
+        # keep paths as clean as possible to prevent stacking
+        # potential todo: detect if user deliberately typed "." and if so, keep
+        if [ "$path" = . ]; then
+            path=$dir_prefix
+        else
+            path=$path/$dir_prefix
+        fi
+
+#         echo - "> recurse: path ($path) arg ($trimmed_arg)"
+
+
+        redo_completion_helper "$path" "$trimmed_arg"
+        local status=$?
+
+        return $status
+    
+    }
+
+    # run_async_unless_fail () {
+    #     if [ "$first_run" = true ] && [ -z "$RES" ]; then
+    # #         echo - '> no match even after compgen -d'
+    #         synchronous_work
+    #     else
+    #         (async_work &)
+    #     fi
+    # }
     # main helper function
     redo_completion_helper () {
         local path=$1 arg=$2
 
-        if pwd | grep '/build$' >/dev/null || ! what_predef_parsed "$path" >/dev/null; then
-            # nothing to do here, `redo what` isn't even available
-        #     echo - dip
-            return 1
-        fi
+        # return value -- must reset at start of function
+        RES=
 
         # clean up $path / $arg -- replace instances of ./ with nothing
         path=$(echo "$path" | sed 's/\b\.\///')
         arg=$(echo "$arg" | sed 's/\b\.\///')
         [ "$arg" = . ] && arg=./ # just bc the user must have typed it in
 
+    #     echo - "> enter: path=($path) arg=($arg)"
+
         # path only gets edited when we recurse, so this is safe
         save_last_confirmed_dir "$path"
 
+        # TODO: make completion work inside of /build directory
+        if pwd | grep '/build$' >/dev/null || ! what_predef_parsed "$path" >/dev/null; then
+            # `redo what` isn't even available
+    #         echo - dip
+            # so just complete dirs
+            append_compgen_dirs
+    #         echo - new res just dropped "RES ($RES)"
+            # return 1
 
-        # return value
-        RES=
+            if should_recurse; then
+                do_recurse
+            fi
+            return 0
+        fi
+
 
         # locals
         local compgen_arg first_run=false
@@ -194,7 +261,7 @@ __redo_completion () {
             dir_cache_save "$path"
         fi
 
-        # echo - "enter: path=($path) arg=($arg) first_run=$first_run"
+        # echo "- first_run=$first_run"
     
         # overview:
         # if typed `redo <tab>` or `redo path/<tab>`, run `redo what` synchronously
@@ -216,18 +283,18 @@ __redo_completion () {
         # if typed `redo <tab>` and cache is outdated, bypass cache
         if [ "$first_run" = true ] && [ -z "$arg" ]; then
             synchronous_work
-            prepend_path
+            append_compgen_dirs
             return 0
         fi
 
 
         if words_cache_ok "$path"; then
             compgen_arg=$(cat "$path"/build/redo/what_cache.txt)
-        #     echo - '> cache ok'
+    #         echo - '> cache ok'
         else
             # fallback to `redo what_predefined`
             compgen_arg=$(what_predef_parsed "$path")
-        #     echo - '> cache fallback to what_predef'
+    #         echo - '> cache fallback to what_predef'
         fi
 
         # generate completions
@@ -235,77 +302,69 @@ __redo_completion () {
 
         if [ -n "$RES" ]; then
 
-        #     echo - '> used cache'
-
-            (async_work &)
+    #         echo - '> used cache'
 
             prepend_path
-            return 0
-        fi
-
-        # echo - '> cache miss'
-
-        # no match, so check for a directory prefix
-        if try_trim_leading_dir "$path" "$arg"; then
-            # found directory, so recurse "into" it
-
-            # these are set by try_trim_leading_dir
-            local dir_prefix=$LEAD_DIR trimmed_arg=$REST
-
-        #     echo - "arg ($arg) vs trimmed halves ($dir_prefix) ($trimmed_arg)"
-
-            # keep paths as clean as possible to prevent stacking
-            # potential todo: detect if user deliberately typed "." and if so, keep
-            if [ "$path" = . ]; then
-                path=$dir_prefix
-            else
-                path=$path/$dir_prefix
-            fi
-
-        #     echo - "> recurse: path ($path) arg ($trimmed_arg)"
-
-
-            redo_completion_helper "$path" "$trimmed_arg"
-            local status=$?
-
-            return $status
-        fi
-
-        # echo - '> no recurse'
-
-        # echo - pre-full arg: "path ($path) arg ($arg)"
-        # match against directories in $path
-        local full_arg
-        if [ "$path" = . ]; then
-            full_arg=$arg
-        elif [ -z "$arg" ]; then
-            full_arg=$path
-        else
-            full_arg=$path/$arg
-        fi
-        RES=$(compgen -d "$full_arg" | grep -v '\bbuild\b' | sed 's/$/\//')
-
-        # echo - full arg: $full_arg
-
-        if [ -n "$RES" ]; then
-        #     echo - '> matched compgen -d'
-            # we have a match, may as well start a bg task in this dir
+            append_compgen_dirs
             (async_work &)
 
-            # don't prepend path, `compgen -d` provides full path names
-            # (since we never `cd` even on recursive calls)
-
             return 0
         fi
 
-        # echo - '> synchronous time'
+    #     echo - '> cache miss'
+
+    #     # no match, so check for a directory prefix
+    #     if try_trim_leading_dir "$path" "$arg"; then
+    #         # found directory, so recurse "into" it
+
+    #         # these are set by try_trim_leading_dir
+    #         local dir_prefix=$LEAD_DIR trimmed_arg=$REST
+
+    # #         echo - "arg ($arg) vs trimmed halves ($dir_prefix) ($trimmed_arg)"
+
+    #         # keep paths as clean as possible to prevent stacking
+    #         # potential todo: detect if user deliberately typed "." and if so, keep
+    #         if [ "$path" = . ]; then
+    #             path=$dir_prefix
+    #         else
+    #             path=$path/$dir_prefix
+    #         fi
+
+    # #         echo - "> recurse: path ($path) arg ($trimmed_arg)"
+
+
+    #         redo_completion_helper "$path" "$trimmed_arg"
+    #         local status=$?
+
+    #         return $status
+    #     fi
+
+        # no match, so check for a directory prefix
+        if should_recurse; then
+            # found directory, so recurse "into" it
+            do_recurse
+            return $?
+        fi
+
+    #     echo - '> no recurse'
+    #     echo - pre-full arg: "path ($path) arg ($arg)"
+
+        RES=
+        append_compgen_dirs
+
+        if [ -n "$RES" ]; then
+            # no need to prepend_path
+            (async_work &)
+            return 0
+        fi
+
+    #     echo - '> synchronous time'
 
         # now there's really nothing to match
         # so do synchronous anyway, but only on first run
         # this is useful for i.e. autocompleting build/ in a directory for the first time after making a .component.yaml file
         if [ "$first_run" = true ]; then
             synchronous_work
-            prepend_path
             return 0
         fi
     }
@@ -321,7 +380,7 @@ __redo_completion () {
             local lastdir=$LAST_DIR
 
             # check if arg starts with dir
-            if echo "$this_word" | grep "^$lastdir" >/dev/null; then
+            if [ "$lastdir" != . ] && echo "$this_word" | grep "^$lastdir" >/dev/null; then
                 subdir=$lastdir
 
                 # the #*$ bit trims a prefix off the left string
@@ -377,7 +436,7 @@ __redo_completion () {
         unset oldifs
     fi
 
-    unset -f redo_cmd_parsed what_parsed what_predef_parsed words_cache_ok words_cache_save dir_first_visit dir_cache_save dir_cache_clean save_last_confirmed_dir get_last_confirmed_dir prepend try_trim_leading_dir synchronous_work async_work prepend_path redo_completion_helper try_cached_dir
+    unset -f redo_cmd_parsed what_parsed what_predef_parsed words_cache_ok words_cache_save dir_first_visit dir_cache_save dir_cache_clean save_last_confirmed_dir get_last_confirmed_dir prepend try_trim_leading_dir append_compgen_dirs synchronous_work async_work prepend_path redo_completion_helper try_cached_dir
     
     # must be very last command, see top
     echo $special_arg > /dev/null
