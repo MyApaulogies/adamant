@@ -73,7 +73,7 @@ what" | grep -v "^$"
 
     # i.e. can we assume that the cache in this directory is completely up to date?
     dir_first_visit () {
-        local path=$1 filename=./build/redo/what_cache_dirs.txt
+        local path=$1 filename=~/.cache/redo/what_cache_dirs.txt
         [ -f "$filename" ] || return 0
 
         cat "$filename" | grep "^$path\$" >/dev/null && return 1
@@ -82,12 +82,12 @@ what" | grep -v "^$"
 
     dir_cache_save () {
         local path=$1 
-        mkdir -p ./build/redo/ && echo "$path" >> ./build/redo/what_cache_dirs.txt
+        mkdir -p ~/.cache/redo/ 2>/dev/null && echo "$path" >> ~/.cache/redo/what_cache_dirs.txt
     }
 
     # doesn't take a path, since dir cache is always relative to ./
     dir_cache_clean () {
-        local filename=./build/redo/what_cache_dirs.txt
+        local filename=~/.cache/redo/what_cache_dirs.txt
         [ -f "$filename" ] && rm "$filename"
     }
 
@@ -98,11 +98,11 @@ what" | grep -v "^$"
     save_last_confirmed_dir () {
         local dir=$1
     #     echo - "saved $dir"
-        mkdir -p ./build/redo/ && echo "$dir" > ./build/redo/what_cache_lastdir.txt
+        mkdir -p ~/.cache/redo/ && echo "$dir" > ~/.cache/redo/what_cache_lastdir.txt
     }
 
     get_last_confirmed_dir () {
-        local filename=./build/redo/what_cache_lastdir.txt
+        local filename=~/.cache/redo/what_cache_lastdir.txt
         [ -f "$filename" ] || return 1
 
         local dir
@@ -235,22 +235,24 @@ $(compgen -d "$full_arg" | grep -v '\bbuild\b' | sed 's/$/\//')" | grep -v '^$')
 
     #     echo - "> enter: path=($path) arg=($arg)"
 
-        # path only gets edited when we recurse, so this is safe
-        save_last_confirmed_dir "$path"
+        if what_predef_parsed "$path" >/dev/null; then
+            # path only gets edited when we recurse, so this is safe
+            save_last_confirmed_dir "$path"
+        else
+            # TODO: make completion work inside of /build directory
+            if pwd | grep '/build$' >/dev/null; then
+                # `redo what` isn't even available
+        #         echo - dip
+                # so just complete dirs
+                append_compgen_dirs
+        #         echo - new res just dropped "RES ($RES)"
+                # return 1
 
-        # TODO: make completion work inside of /build directory
-        if pwd | grep '/build$' >/dev/null || ! what_predef_parsed "$path" >/dev/null; then
-            # `redo what` isn't even available
-    #         echo - dip
-            # so just complete dirs
-            append_compgen_dirs
-    #         echo - new res just dropped "RES ($RES)"
-            # return 1
-
-            if should_recurse; then
-                do_recurse
+                if should_recurse; then
+                    do_recurse
+                fi
+                return 0
             fi
-            return 0
         fi
 
 
