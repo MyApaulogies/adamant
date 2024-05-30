@@ -193,7 +193,7 @@ $(compgen -d "$full_arg" | grep -v '\bbuild\b' | sed 's/$/\//')" | grep -v '^$')
         # these are set by try_trim_leading_dir
         local dir_prefix=$LEAD_DIR trimmed_arg=$REST
 
-#         echo - "arg ($arg) vs trimmed halves ($dir_prefix) ($trimmed_arg)"
+    #     echo - "arg ($arg) vs trimmed halves ($dir_prefix) ($trimmed_arg)"
 
         # keep paths as clean as possible to prevent stacking
         # potential todo: detect if user deliberately typed "." and if so, keep
@@ -203,7 +203,7 @@ $(compgen -d "$full_arg" | grep -v '\bbuild\b' | sed 's/$/\//')" | grep -v '^$')
             path=$path/$dir_prefix
         fi
 
-#         echo - "> recurse: path ($path) arg ($trimmed_arg)"
+    #     echo - "> recurse: path ($path) arg ($trimmed_arg)"
 
 
         redo_completion_helper "$path" "$trimmed_arg"
@@ -240,19 +240,24 @@ $(compgen -d "$full_arg" | grep -v '\bbuild\b' | sed 's/$/\//')" | grep -v '^$')
             save_last_confirmed_dir "$path"
         else
             # TODO: make completion work inside of /build directory
+            # for now just dip
+    #         echo - '> redo what unavailable'
             if pwd | grep '/build$' >/dev/null; then
-                # `redo what` isn't even available
-        #         echo - dip
-                # so just complete dirs
-                append_compgen_dirs
-        #         echo - new res just dropped "RES ($RES)"
-                # return 1
-
-                if should_recurse; then
-                    do_recurse
-                fi
                 return 0
             fi
+
+            # `redo what` isn't even available
+    #         echo - dip
+            # so just complete dirs
+            append_compgen_dirs
+    #         echo - new res just dropped "RES ($RES)"
+            # return 1
+
+            if should_recurse; then
+    #             echo - '> yet recurse'
+                do_recurse
+            fi
+            return 0
         fi
 
 
