@@ -256,6 +256,7 @@ $(compgen -d "$full_arg" | grep -v '\bbuild\b' | sed 's/$/\//')" | grep -v '^$')
             if should_recurse; then
     #             echo - '> yet recurse'
                 do_recurse
+                return $?
             fi
             return 0
         fi
@@ -387,7 +388,7 @@ $(compgen -d "$full_arg" | grep -v '\bbuild\b' | sed 's/$/\//')" | grep -v '^$')
             local lastdir=$LAST_DIR
 
             # check if arg starts with dir
-            if [ "$lastdir" != . ] && echo "$this_word" | grep "^$lastdir" >/dev/null; then
+            if [ "$lastdir" != . ] && echo "$this_word" | grep "^$lastdir/" >/dev/null; then
                 subdir=$lastdir
 
                 # the #*$ bit trims a prefix off the left string
