@@ -86,7 +86,7 @@ package body {{ name }} is
 
       -- Update the packet length and sequence count:
       Pkt.Header.Buffer_Length := Num_Bytes_Serialized;
-      Self.{{ p.name }}_Sequence_Count := Self.{{ p.name }}_Sequence_Count + 1;
+      Self.{{ p.name }}_Sequence_Count := @ + 1;
 
       return Stat;
    end {{ p.name }};
@@ -124,7 +124,7 @@ package body {{ name }} is
          Num_Bytes_Copied : constant Natural := Safe_Left_Copy (P.Buffer, Overlay);
       begin
          P.Header.Buffer_Length := Num_Bytes_Copied;
-         Self.{{ p.name }}_Sequence_Count := Self.{{ p.name }}_Sequence_Count + 1;
+         Self.{{ p.name }}_Sequence_Count := @ + 1;
       end;
 
       return P;
@@ -147,7 +147,7 @@ package body {{ name }} is
       );
    begin
       P.Buffer (P.Buffer'First .. P.Buffer'First + Packet_Serializer.Serialized_Length - 1) := Packet_Serializer.To_Byte_Array (Item);
-      Self.{{ p.name }}_Sequence_Count := Self.{{ p.name }}_Sequence_Count + 1;
+      Self.{{ p.name }}_Sequence_Count := @ + 1;
       return P;
    end {{ p.name }};
 {% endif %}
@@ -194,7 +194,7 @@ package body {{ name }} is
       );
    begin
       -- Increment the sequence count:
-      Self.{{ p.name }}_Sequence_Count := Self.{{ p.name }}_Sequence_Count + 1;
+      Self.{{ p.name }}_Sequence_Count := @ + 1;
       return P;
    end {{ p.name }}_Empty;
 {% endif %}

@@ -111,14 +111,14 @@ package body Component.Ccsds_Command_Depacketizer.Implementation is
                         else
                            -- We don't need anything else out of the secondary header, unless an error
                            -- occurs, so just skip right over it.
-                           Next_Index := Next_Index + Ccsds_Command_Secondary_Header_Length;
+                           Next_Index := @ + Ccsds_Command_Secondary_Header_Length;
 
                            -- Set the command header arg buffer length:
                            The_Command.Header.Arg_Buffer_Length := Argument_Data_Length;
 
                            -- Extract command id:
                            The_Command.Header.Id := Command_Id.Serialization.From_Byte_Array (Arg.Data (Next_Index .. Next_Index + Command_Id_Length - 1)).Id;
-                           Next_Index := Next_Index + Command_Id_Length;
+                           Next_Index := @ + Command_Id_Length;
 
                            -- Copy argument buffer:
                            The_Command.Arg_Buffer (The_Command.Arg_Buffer'First .. The_Command.Arg_Buffer'First + Argument_Data_Length - 1) := Arg.Data (Next_Index .. Next_Index + Argument_Data_Length - 1);

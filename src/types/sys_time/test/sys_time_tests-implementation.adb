@@ -126,7 +126,7 @@ package body Sys_Time_Tests.Implementation is
          Difference := Float_Sum_Time - Time_Sum;
 
          -- Update sum
-         Diff_Sum := Diff_Sum + abs (Difference);
+         Diff_Sum := @ + abs (Difference);
 
          -- Keep track of max difference
          if abs (Difference) > Diff_Max then
@@ -211,7 +211,7 @@ package body Sys_Time_Tests.Implementation is
          Difference := Float_Sum_Time_Span - Time_Sum;
 
          -- Update sum
-         Diff_Sum := Diff_Sum + abs (Difference);
+         Diff_Sum := @ + abs (Difference);
 
          -- Keep track of max difference
          if abs (Difference) > Diff_Max then
@@ -308,7 +308,7 @@ package body Sys_Time_Tests.Implementation is
             Difference := Float_Sum_Sys_Time - Time_Diff;
 
             -- Update sum
-            Diff_Sum := Diff_Sum + Difference;
+            Diff_Sum := @ + Difference;
 
             -- Keep track of max difference
             if abs (Difference) > Diff_Max then
