@@ -4,7 +4,7 @@ services:
         image: ghcr.io/lasp/adamant:latest
         build:
             context: .
-        container_name: adamant_container
+        container_name: at_syntax
         volumes:
             - type: bind
               source: ../../adamant
