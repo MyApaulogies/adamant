@@ -1,0 +1,49 @@
+# more info:
+# https://devsjc.github.io/blog/20240627-the-complete-guide-to-pyproject-toml/
+# https://packaging.python.org/en/latest/guides/writing-pyproject-toml/
+
+
+[project]
+name = "admt"
+description = "A CLI tool for the Adamant framework."
+version = "1.0.0"
+requires-python = ">=3.10"
+authors = [
+    # {name = "Him", email = "him@example.com"},
+]
+license = {text = "BSD-3-Clause"}
+readme = "README.md"
+dependencies = [
+    "click == 8.1",
+]
+
+[build-system]
+requires = ["setuptools == 75.1"]
+build-backend = "setuptools.build_meta"
+
+[project.scripts]
+# format is module.module.module:function
+admt = "main:main"
+
+
+
+[project.optional-dependencies]
+lint = [
+    "ruff == 0.6.8",
+]
+test = [
+    "pytest == 8.3.3",
+]
+dev = [
+    "admt[lint,test]",
+]
+
+
+[tool.ruff]
+line-length = 100
+indent-width = 4
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "auto"
